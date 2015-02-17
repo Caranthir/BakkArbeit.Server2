@@ -10,6 +10,8 @@ import java.util.Set;
 import javax.persistence.*;
 import javax.xml.bind.annotation.XmlRootElement;
 
+import controller.PasswordHash;
+
 /**
  * Entity implementation class for Entity: Person
  *
@@ -18,7 +20,6 @@ import javax.xml.bind.annotation.XmlRootElement;
 @NamedQuery(name="findPersonByName", query="SELECT p FROM Person p WHERE p.Nickname= ?1")
 @XmlRootElement
 public class Person implements Serializable {
-
 
 	private String Email;
 	private String Password;
@@ -64,8 +65,8 @@ public class Person implements Serializable {
 		return this.Password;
 	}
 
-	public void setPassword(String Password) {
-		this.Password = Password;
+	public void setPassword(String Password) throws Exception {
+		this.Password = PasswordHash.getSaltedHash(Password);
 	}   
 	public String getNickname() {
 		return this.Nickname;

@@ -22,10 +22,19 @@ public class Datas implements Serializable {
 	private int id;
 	private String Name;
 	private String Path;
-	private String Type;
-	private static final long serialVersionUID = 1L;
-	private List<Person> persons = new ArrayList<Person>();
 
+
+	private String Type;
+	private String MD5;
+	private static final long serialVersionUID = 1L;
+	private List<Person> persons = new ArrayList<Person>(); // persons with whom this data is shared
+	
+	public String getMD5() {
+		return MD5;
+	}
+	public void setMD5(String mD5) {
+		MD5 = mD5;
+	}
 	public List<Person> getPersons() {
 		return persons;
 	}
@@ -49,6 +58,7 @@ public class Datas implements Serializable {
 	public void setName(String Name) {
 		this.Name = Name;
 	}   
+	
 	public String getPath() {
 		return this.Path;
 	}
@@ -61,7 +71,9 @@ public class Datas implements Serializable {
 	}
 
 	public void setType(String Type) {
-		this.Type = Type;
+		if(Type.equals("jpeg") || Type.equals("jpg") || Type.equals("png")){
+			this.Type = "Photo";
+		}
 	}
    
 }

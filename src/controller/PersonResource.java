@@ -8,39 +8,38 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayList;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.util.List;
 import java.util.StringTokenizer;
 
 import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
-import javax.persistence.NamedQuery;
 import javax.persistence.NoResultException;
 import javax.persistence.Persistence;
 import javax.persistence.Query;
 import javax.servlet.ServletOutputStream;
 import javax.servlet.http.HttpServletResponse;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
 import javax.ws.rs.Consumes;
+import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
+import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.MultivaluedMap;
+import javax.ws.rs.core.Request;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
-import javax.ws.rs.core.Request;
-
-import sun.misc.BASE64Decoder;
-
-import org.apache.commons.codec.binary.Base64;
-import org.apache.commons.codec.binary.StringUtils;
 
 import com.sun.jersey.core.header.FormDataContentDisposition;
+import com.sun.jersey.core.util.Base64;
 import com.sun.jersey.multipart.FormDataParam;
 
 import entity.Datas;
@@ -73,7 +72,7 @@ public class PersonResource {
 		return "Demo service is ready!";
 	}
 
-	@GET
+	@POST
 	@Path("sample")
 	@Produces(MediaType.APPLICATION_JSON)
 	public Person getSamplePerson() {
@@ -85,12 +84,12 @@ public class PersonResource {
 	}
 
 	// Use data from the client source to create a new Person object, returned in JSON format. 
-	@POST
+	@PUT
 	@Consumes(MediaType.APPLICATION_FORM_URLENCODED)
 	@Produces(MediaType.APPLICATION_JSON)
 	public Person postPerson(
 			MultivaluedMap<String, String> personParams
-			) {
+			) throws Exception {
 
 		String nickName = personParams.getFirst("nickname");
 		String pass = personParams.getFirst("password");
@@ -111,10 +110,10 @@ public class PersonResource {
 		em.persist(person);
 		em.getTransaction().commit();
 
+
 		System.out.println("person info: " + person.getNickname() + " " + person.getPassword() + " " + person.getEmail());
-
+		System.out.println(PasswordHash.check(pass, person.getPassword()));
 		return person;
-
 	}
 
 	@GET
@@ -132,7 +131,7 @@ public class PersonResource {
 	@Path("addfriend")
 	@Consumes(MediaType.TEXT_PLAIN)
 	@Produces(MediaType.TEXT_PLAIN)
-	public String addFriend(String friendname, @Context HttpHeaders headers){
+	public String addFriend(String friendname, @Context HttpHeaders headers) throws Exception{
 		Person p= getPerson(headers);
 		p.getFriends().add(getPerson(friendname));
 
@@ -143,19 +142,20 @@ public class PersonResource {
 		return "OK";
 	}
 
-	@POST
+	@PUT
 	@Path("upload")
 	@Consumes(MediaType.MULTIPART_FORM_DATA)
 	@Produces(MediaType.TEXT_PLAIN)
 	public String uploadFile(
 			@FormDataParam("file") InputStream uploadedInputStream,
 			@FormDataParam("file") FormDataContentDisposition fileDetail,
-			@Context HttpHeaders headers) {
+			@Context HttpHeaders headers) throws Exception {
+		System.out.println("UPLOAD FILE");
 
 		Person p = getPerson(headers);
 
 		//final List<String> contentType = headers.getRequestHeader(HttpHeaders.CONTENT_TYPE);
-		System.out.println(p.getNickname()); 
+		System.out.println("upload " + p.getNickname()); 
 		System.out.println(fileDetail.getFileName());
 
 		String uploadedFileLocation = "c://uploaded/" +p.getNickname()+ "/" + fileDetail.getFileName();
@@ -164,22 +164,22 @@ public class PersonResource {
 
 		if (!file.exists()) {
 			if (file.mkdirs()) {
-				System.out.println("Multiple directories are created!");
+				System.out.println("directory are created!");
 			} else {
 				System.out.println("Failed to create multiple directories!");
 			}
 		}
 
-
+		writeToFile(uploadedInputStream, uploadedFileLocation);
 		Datas d= new Datas();
 		d.addPerson(p);
 		d.setPath(uploadedFileLocation);
 		d.setName(fileDetail.getFileName());
-		d.setType(d.getName().substring(d.getName().length()-3,d.getName().length()));
+		d.setType(d.getName().substring(d.getName().lastIndexOf('.'), d.getName().length()));
+		d.setMD5(MD5.calculateMD5(new File(uploadedFileLocation)));
 		p.addDatas(d);
 
 		// save it
-		writeToFile(uploadedInputStream, uploadedFileLocation);
 
 		em.getTransaction().begin();
 		em.persist(d);
@@ -196,14 +196,14 @@ public class PersonResource {
 	 * @param response
 	 * @param headers
 	 * @return
-	 * @throws IOException
+	 * @throws Exception 
 	 */
 
 	@GET
 	@Path("/{key}")
 	public Response download(@PathParam("key") int key,
 			@Context HttpServletResponse response,
-			@Context HttpHeaders headers) throws IOException {
+			@Context HttpHeaders headers) throws Exception {
 		Person p = getPerson(headers);
 		Datas d=null;
 		for(Datas i: p.getDatas()){
@@ -217,6 +217,8 @@ public class PersonResource {
 			return null;
 		}
 		File file = new File(d.getPath());
+		System.out.println("trying to download "+ file.getName());
+
 
 		response.setContentLength((int) file.length());
 		response.setHeader("Content-Disposition", "attachment; filename="
@@ -234,14 +236,49 @@ public class PersonResource {
 
 		in.close();
 		outStream.flush();
+		outStream.close();
 
 		return Response.ok().build();
+	}
+
+
+	@DELETE
+	@Path("/delete/{key}")
+	public String delete(@PathParam("key") int key,
+			@Context HttpHeaders headers) throws Exception {
+		Person p = getPerson(headers);
+		Datas d=null;
+		for(Datas i: p.getDatas()){
+			if(i.getId()==key){
+				//System.out.println("olduu");
+				d=i;
+				break;
+			}
+		}
+		if(d==null){
+			return null;
+		}
+		java.nio.file.Path path = FileSystems.getDefault().getPath(d.getPath());
+		try {
+			em.getTransaction().begin();
+			p.getDatas().remove(d);
+			em.remove(d);
+			em.getTransaction().commit();
+			Files.delete(path);
+		} 
+		catch(NoSuchFileException e){
+			return null;
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return "SUCCESS";
+
 	}
 
 	@GET
 	@Path("dataslist")
 	@Produces(MediaType.APPLICATION_JSON)
-	public List<Datas> getDatasList(@Context HttpHeaders headers){
+	public List<Datas> getDatasList(@Context HttpHeaders headers) throws Exception{
 		return getPerson(headers).getDatas();	
 	}
 
@@ -261,6 +298,7 @@ public class PersonResource {
 			while ((read = uploadedInputStream.read(bytes)) != -1) {
 				out.write(bytes, 0, read);
 			}
+			uploadedInputStream.close();
 			out.flush();
 			out.close();
 		} catch (IOException e) {
@@ -286,12 +324,9 @@ public class PersonResource {
 	@GET
 	@Path("login")
 	@Produces(MediaType.APPLICATION_JSON)
-	public Person getPerson(@Context HttpHeaders headers){
-
-
+	public Person getPerson(@Context HttpHeaders headers) throws Exception{
 		final String AUTHENTICATION_SCHEME = "Basic";
 		//Get request headers
-
 		//Fetch authorization header
 		final List<String> authorization = headers.getRequestHeader(HttpHeaders.AUTHORIZATION);
 
@@ -304,16 +339,20 @@ public class PersonResource {
 
 		//Get encoded username and password
 		final String encodedUserPassword = authorization.get(0).replaceFirst(AUTHENTICATION_SCHEME + " ", "");
+		System.out.println("Login " + encodedUserPassword);
 
 		//Decode username and password
-		String usernameAndPassword;
-		//usernameAndPassword = StringUtils.newStringUtf8(Base64.decodeBase64(encodedUserPassword));
+		String usernameAndPassword = new String(Base64.decode(encodedUserPassword));
+		System.out.println("Login encoded " + usernameAndPassword);
+
 		//usernameAndPassword = StringUtils.newStringUtf8(Base64.decodeBase64(encodedUserPassword));
 
 		//Split username and password tokens
-		final StringTokenizer tokenizer = new StringTokenizer(encodedUserPassword, ":");
+		final StringTokenizer tokenizer = new StringTokenizer(usernameAndPassword, ":");
 		final String username = tokenizer.nextToken();
 		final String password = tokenizer.nextToken();
+
+		System.out.println(username + " " + password);
 
 		//Query q = em.createQuery("SELECT p FROM Person p WHERE p.Nickname='" + username+ "'");
 
@@ -328,7 +367,8 @@ public class PersonResource {
 		if(p==null){
 			return null;
 		}
-		if(!p.getPassword().equals(password)){
+		if(!PasswordHash.check(password, p.getPassword())){
+			System.out.println(password + " FAILURE " + p.getPassword());
 			return null;
 		}
 
